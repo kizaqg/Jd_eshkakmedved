@@ -38,6 +38,9 @@ internal sealed class Settings
     public bool SkipWhenModifiersHeld { get; set; } = true;
     public string GameProcess { get; set; } = "";
 
+    /// <summary>По этой части заголовка окно игры находится само, без нажатия хоткея.</summary>
+    public string GameTitle { get; set; } = "Jade Dynasty";
+
     /// <summary>Разобранные клавиши слотов (null, если слот пуст, выключен или клавиша не распознана).</summary>
     [JsonIgnore] public KeySpec?[] Parsed { get; private set; } = new KeySpec?[SlotCount];
 
@@ -61,6 +64,7 @@ internal sealed class Settings
         GapMs = Math.Clamp(GapMs, 0, 1000);
         ToggleHotkey ??= "";
         GameProcess ??= "";
+        GameTitle ??= "";
         if (ChatArea is { W: <= 0 } or { H: <= 0 }) ChatArea = null;
         Parsed = new KeySpec?[SlotCount];
         for (int i = 0; i < SlotCount; i++)

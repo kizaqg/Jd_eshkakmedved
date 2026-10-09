@@ -89,6 +89,28 @@ internal static unsafe class Native
     public static extern IntPtr WindowFromPoint(POINT p);
 
     public const uint GA_ROOT = 2;
+    public const uint GW_OWNER = 4;
+
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetWindowText(IntPtr hWnd, char[] buf, int max);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
+
+    public static string WindowTitle(IntPtr hWnd)
+    {
+        var buf = new char[256];
+        int n = GetWindowText(hWnd, buf, buf.Length);
+        return n > 0 ? new string(buf, 0, n) : "";
+    }
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
@@ -190,6 +212,28 @@ internal static unsafe class Native
 
     [DllImport("advapi32.dll", SetLastError = true)]
     static extern bool GetTokenInformation(IntPtr token, int cls, out int info, int len, out int retLen);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool QueryFullProcessImageName(IntPtr process, uint flags, char[] buf, ref int size);
+
+    /// <summary>Имя exe процесса без расширения. Работает и для процессов, запущенных от администратора.</summary>
+    public static string ProcessName(int pid)
+    {
+        var h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)pid);
+        if (h != IntPtr.Zero)
+        {
+            try
+            {
+                var buf = new char[1024];
+                int size = buf.Length;
+                if (QueryFullProcessImageName(h, 0, buf, ref size))
+                    return Path.GetFileNameWithoutExtension(new string(buf, 0, size));
+            }
+            finally { CloseHandle(h); }
+        }
+        try { using var p = System.Diagnostics.Process.GetProcessById(pid); return p.ProcessName; }
+        catch { return ""; }
+    }
 
     /// <summary>Запущен ли процесс от администратора. Если доступа нет, считаем, что да (так обычно и бывает).</summary>
     public static bool IsProcessElevated(int pid)

@@ -8,10 +8,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>JdClicker</AssemblyName>
+    <AssemblyName>JD YA HAVAU TI PADAESH</AssemblyName>
     <RootNamespace>JdClicker</RootNamespace>
-    <Version>1.0.0</Version>
-    <Product>JdClicker</Product>
+    <Version>1.1.0</Version>
+    <Product>JD YA HAVAU TI PADAESH</Product>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <Description>Автонажатие клавиш зелий для Jade Dynasty</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
@@ -24,5 +25,10 @@
     <DebugType>none</DebugType>
     <SatelliteResourceLanguages>ru</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\pig.png" LogicalName="JdClicker.Assets.pig.png" />
+    <EmbeddedResource Include="Assets\app.ico" LogicalName="JdClicker.Assets.app.ico" />
+  </ItemGroup>
 
 </Project>

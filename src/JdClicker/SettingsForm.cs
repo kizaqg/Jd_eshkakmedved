@@ -69,7 +69,8 @@ internal sealed class SettingsForm : Form
         AutoScaleDimensions = new SizeF(96f, 96f);
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Segoe UI", 9f);
-        Text = "JdClicker — автонажатие зелий";
+        Text = AppInfo.Name;
+        Icon = AppInfo.LoadAppIcon();
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -216,7 +217,7 @@ internal sealed class SettingsForm : Form
     {
         _chatInfo.Text = s.ChatArea is { } a ? $"задано: {a.W}×{a.H} в ({a.X}, {a.Y})" : "не задано";
         _gameInfo.Text = "Окно игры: " + (string.IsNullOrEmpty(s.GameProcess)
-            ? "не выбрано (нажмите хоткей в игре)"
+            ? "elementclient.exe (Jade Dynasty)"
             : s.GameProcess + ".exe");
         _hotkeyError.Text = _app.HotkeyError ?? "";
         for (int i = 0; i < Settings.SlotCount; i++)
@@ -254,7 +255,7 @@ internal sealed class SettingsForm : Form
         string game = State.TargetPid == 0 ? "игра не найдена"
             : State.GameForeground() ? "игра активна" : "игра не на переднем плане";
         string chat = State.ChatOpen ? (s.PauseInChat ? "чат открыт — пауза" : "чат открыт") : "чат закрыт";
-        string admin = _app.NeedAdmin ? "\nИгра запущена от администратора — перезапустите JdClicker от администратора (меню в трее)." : "";
+        string admin = _app.NeedAdmin ? "\nИгра запущена от администратора — перезапустите программу от администратора (меню в трее)." : "";
         _status.ForeColor = _app.NeedAdmin ? Color.Firebrick : SystemColors.ControlText;
         _status.Text = $"Состояние: {state} · {game} · {chat}\n" +
                        $"Нажатий дошло до игры: {Interlocked.Read(ref State.Sent)} · отсечено защитой: {Interlocked.Read(ref State.Blocked)}{admin}";

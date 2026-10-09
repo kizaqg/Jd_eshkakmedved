@@ -31,7 +31,7 @@ internal sealed class OverlayForm : Form
         Opacity = 0.88;
         DoubleBuffered = true;
         Font = new Font("Segoe UI", 9f, FontStyle.Bold);
-        Text = "JdClicker";
+        Text = AppInfo.Name;
     }
 
     protected override bool ShowWithoutActivation => true;

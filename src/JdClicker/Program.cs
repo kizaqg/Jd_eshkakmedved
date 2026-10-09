@@ -14,7 +14,7 @@ internal static class Program
         }
         if (!owned)
         {
-            MessageBox.Show("JdClicker уже запущен — ищите иконку в трее.", "JdClicker",
+            MessageBox.Show("Программа уже запущена — ищите свинью в трее.", AppInfo.Name,
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }

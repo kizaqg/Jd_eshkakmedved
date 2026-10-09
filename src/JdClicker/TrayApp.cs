@@ -37,7 +37,7 @@ internal sealed class TrayApp : ApplicationContext
             MessageBox.Show(
                 $"Не удалось прочитать settings.json:\n{loadError}\n\nБудут использованы настройки по умолчанию. " +
                 "Файл не перезапишется, пока вы не поменяете что-нибудь в окне настроек.",
-                "JdClicker", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                AppInfo.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             loaded = Settings.CreateDefault();
         }
         else
@@ -46,10 +46,13 @@ internal sealed class TrayApp : ApplicationContext
         }
         State.Settings = loaded;
 
-        _iconOn = MakeIcon(Color.LimeGreen);
-        _iconOff = MakeIcon(Color.Gray);
-        _iconPause = MakeIcon(Color.Gold);
-        _iconWarn = MakeIcon(Color.Red);
+        using (var pig = AppInfo.LoadPig())
+        {
+            _iconOn = MakeIcon(pig, Color.LimeGreen);
+            _iconOff = MakeIcon(pig, Color.Gray);
+            _iconPause = MakeIcon(pig, Color.Gold);
+            _iconWarn = MakeIcon(pig, Color.Red);
+        }
 
         _menu = new ContextMenuStrip();
         _miToggle = new ToolStripMenuItem("Включить", null, (_, _) => Toggle(fromHotkey: false));
@@ -69,7 +72,7 @@ internal sealed class TrayApp : ApplicationContext
             new ToolStripMenuItem("Выход", null, (_, _) => ExitThread()),
         });
 
-        _tray = new NotifyIcon { Icon = _iconOff, Text = "JdClicker — ВЫКЛ", ContextMenuStrip = _menu, Visible = true };
+        _tray = new NotifyIcon { Icon = _iconOff, Text = "JD — ВЫКЛ", ContextMenuStrip = _menu, Visible = true };
         _tray.DoubleClick += (_, _) => ShowSettings();
 
         _overlay = new OverlayForm(_menu);
@@ -105,7 +108,8 @@ internal sealed class TrayApp : ApplicationContext
         _tick.Tick += (_, _) => OnTick();
         _tick.Start();
 
-        TryFindGame();
+        Log.Write($"Запуск {AppInfo.Name} {AppInfo.Version}, от админа: {Environment.IsPrivilegedProcess}, хуки: {_hooks.Installed}");
+        if (!TryFindGame()) Log.Write("При запуске окно игры не найдено");
         if (!_hooks.Installed)
             Balloon("Не удалось установить перехват клавиатуры — защита чата не работает.", ToolTipIcon.Warning);
         else
@@ -125,26 +129,25 @@ internal sealed class TrayApp : ApplicationContext
 
         if (fromHotkey && fg != IntPtr.Zero && fgPid != 0 && fgPid != State.OwnPid)
         {
-            // Хоткей нажат в каком-то окне: привязываемся к нему, но только если это игра.
-            string name = ProcessName(fgPid);
-            if (s.GameProcess.Length > 0 && !string.Equals(name, s.GameProcess, StringComparison.OrdinalIgnoreCase))
+            // Хоткей нажат в каком-то окне: привязываемся к нему, если это игра
+            // (или если игра ещё ни разу не была выбрана — тогда запоминаем это окно).
+            var root = Native.GetAncestor(fg, Native.GA_ROOT);
+            string name = Native.ProcessName(fgPid);
+            string title = Native.WindowTitle(root);
+            Log.Write($"Хоткей в окне «{title}» ({name}.exe, pid {fgPid})");
+            if (!IsGameWindow(name, title, s) && (s.GameProcess.Length > 0 || FindGameWindow(s) is not null))
             {
                 Sounds.PlayError();
-                Balloon($"Активное окно — {name}.exe, а игра — {s.GameProcess}.exe. " +
+                Balloon($"Активное окно — «{title}» ({name}.exe), а игра — {s.GameProcess}.exe. " +
                         "Перейдите в игру или нажмите «Забыть» в настройках.", ToolTipIcon.Warning);
                 return;
             }
-            BindTarget(Native.GetAncestor(fg, Native.GA_ROOT), fgPid);
-            if (s.GameProcess.Length == 0 && name.Length > 0)
-            {
-                var c = s.Clone();
-                c.GameProcess = name;
-                ApplySettings(c);
-            }
+            BindTarget(root, fgPid, name);
         }
         else if (!TargetAlive() && !TryFindGame())
         {
             Sounds.PlayError();
+            Log.Write("Включение: окно игры не найдено");
             Balloon($"Окно игры не найдено. Перейдите в игру и нажмите {HotkeyText()}.", ToolTipIcon.Warning);
             return;
         }
@@ -160,17 +163,30 @@ internal sealed class TrayApp : ApplicationContext
             _clicker.Reset();
         }
         State.Enabled = on;
+        Log.Write(on ? "ВКЛ" : "ВЫКЛ");
         if (on) Sounds.PlayOn(); else Sounds.PlayOff();
         UpdateUi();
     }
 
-    void BindTarget(IntPtr hwnd, int pid)
+    void BindTarget(IntPtr hwnd, int pid, string name)
     {
         bool changed = State.TargetPid != pid || State.TargetHwnd != hwnd;
         State.TargetHwnd = hwnd;
         State.TargetPid = pid;
+
+        var s = State.Settings;
+        if (s.GameProcess.Length == 0 && name.Length > 0)
+        {
+            var c = s.Clone();
+            c.GameProcess = name;
+            ApplySettings(c);
+            _settingsForm?.LoadFrom(State.Settings);
+        }
         if (!changed) return;
+
         NeedAdmin = !Environment.IsPrivilegedProcess && Native.IsProcessElevated(pid);
+        Log.Write($"Окно игры: «{Native.WindowTitle(hwnd)}» ({name}.exe, pid {pid}, hwnd 0x{hwnd:X}), " +
+                  $"игра от админа: {Native.IsProcessElevated(pid)}, мы от админа: {Environment.IsPrivilegedProcess}");
         if (NeedAdmin)
             Balloon("Игра запущена от администратора: без прав администратора нажатия до неё не дойдут. " +
                     "Меню в трее → «Перезапустить от администратора».", ToolTipIcon.Warning);
@@ -178,33 +194,58 @@ internal sealed class TrayApp : ApplicationContext
 
     static bool TargetAlive() => State.TargetHwnd != IntPtr.Zero && Native.IsWindow(State.TargetHwnd);
 
-    bool TryFindGame()
+    static readonly string[] NotGames =
     {
-        var name = State.Settings.GameProcess;
-        if (string.IsNullOrEmpty(name)) return false;
-        foreach (var p in Process.GetProcessesByName(name))
-        {
-            using (p)
-            {
-                try
-                {
-                    var h = p.MainWindowHandle;
-                    if (h != IntPtr.Zero && Native.IsWindowVisible(h))
-                    {
-                        BindTarget(h, p.Id);
-                        return true;
-                    }
-                }
-                catch { /* процесс завершился */ }
-            }
-        }
-        return false;
+        "chrome", "msedge", "firefox", "opera", "browser", "yandex", "brave", "vivaldi",
+        "explorer", "discord", "telegram", "notepad", "notepad++",
+    };
+
+    /// <summary>Процесс клиента Jade Dynasty (elementclient.exe) или тот, что запомнен в настройках.</summary>
+    static bool IsKnownGameProcess(string name, Settings s) =>
+        string.Equals(name, "elementclient", StringComparison.OrdinalIgnoreCase) ||
+        (s.GameProcess.Length > 0 && string.Equals(name, s.GameProcess, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Окно игры: процесс совпадает с запомненным или заголовок начинается с «Jade Dynasty» (не браузер).</summary>
+    static bool IsGameWindow(string name, string title, Settings s)
+    {
+        if (IsKnownGameProcess(name, s)) return true;
+        if (s.GameTitle.Length == 0 || !title.Trim().StartsWith(s.GameTitle, StringComparison.OrdinalIgnoreCase))
+            return false;
+        return !NotGames.Contains(name, StringComparer.OrdinalIgnoreCase);
     }
 
-    static string ProcessName(int pid)
+    /// <summary>Ищет видимое окно игры среди всех окон верхнего уровня. Совпадение по процессу важнее, затем — самое большое окно.</summary>
+    static (IntPtr Hwnd, int Pid, string Name)? FindGameWindow(Settings s)
     {
-        try { using var p = Process.GetProcessById(pid); return p.ProcessName; }
-        catch { return ""; }
+        (IntPtr, int, string)? best = null;
+        int bestScore = -1;
+        var names = new Dictionary<int, string>();
+        Native.EnumWindows((h, _) =>
+        {
+            if (!Native.IsWindowVisible(h) || Native.GetWindow(h, Native.GW_OWNER) != IntPtr.Zero) return true;
+            Native.GetWindowThreadProcessId(h, out uint upid);
+            int pid = (int)upid;
+            if (pid == 0 || pid == State.OwnPid) return true;
+            if (!names.TryGetValue(pid, out var name)) names[pid] = name = Native.ProcessName(pid);
+            var title = Native.WindowTitle(h);
+            if (!IsGameWindow(name, title, s)) return true;
+
+            Native.GetWindowRect(h, out var r);
+            int area = Math.Max(0, r.Right - r.Left) / 4 * (Math.Max(0, r.Bottom - r.Top) / 4);
+            if (Native.IsIconic(h)) area = 1;
+            bool byProcess = IsKnownGameProcess(name, s);
+            int score = (byProcess ? 1 << 28 : 0) + Math.Min(area, (1 << 28) - 1);
+            if (score > bestScore) { bestScore = score; best = (h, pid, name); }
+            return true;
+        }, IntPtr.Zero);
+        return best;
+    }
+
+    bool TryFindGame()
+    {
+        if (FindGameWindow(State.Settings) is not { } w) return false;
+        BindTarget(w.Hwnd, w.Pid, w.Name);
+        return true;
     }
 
     public void ForgetGame()
@@ -217,21 +258,34 @@ internal sealed class TrayApp : ApplicationContext
         c.GameProcess = "";
         ApplySettings(c);
         _settingsForm?.LoadFrom(State.Settings);
+        Log.Write("Окно игры забыто");
     }
 
     // ---------------- Таймер интерфейса ----------------
 
     void OnTick()
     {
-        if (State.TargetHwnd != IntPtr.Zero && !Native.IsWindow(State.TargetHwnd))
+        var target = State.TargetHwnd;
+        if (target != IntPtr.Zero && (!Native.IsWindow(target) || !Native.IsWindowVisible(target)))
         {
-            State.TargetHwnd = IntPtr.Zero;
-            State.TargetPid = 0;
-            NeedAdmin = false;
-            if (State.Enabled)
+            // Игра могла пересоздать окно (загрузка, смена режима) — ищем новое, не выключаясь.
+            bool dead = !Native.IsWindow(target);
+            if (FindGameWindow(State.Settings) is { } w && w.Hwnd != target)
             {
-                SetEnabled(false);
-                Balloon("Окно игры закрыто — автонажатие выключено.");
+                Log.Write($"Окно игры сменилось (старое {(dead ? "закрыто" : "скрыто")})");
+                BindTarget(w.Hwnd, w.Pid, w.Name);
+            }
+            else if (dead)
+            {
+                Log.Write("Окно игры закрыто");
+                State.TargetHwnd = IntPtr.Zero;
+                State.TargetPid = 0;
+                NeedAdmin = false;
+                if (State.Enabled)
+                {
+                    SetEnabled(false);
+                    Balloon("Окно игры закрыто — автонажатие выключено.");
+                }
             }
         }
         if (State.TargetPid == 0 && ++_tickCount % 10 == 0) TryFindGame();
@@ -252,7 +306,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         var (color, text, icon) = CurrentStatus();
         if (_tray.Icon != icon) _tray.Icon = icon;
-        var tip = "JdClicker — " + text;
+        var tip = "JD YA HAVAU — " + text;
         if (_tray.Text != tip) _tray.Text = tip.Length > 63 ? tip[..63] : tip;
         _miToggle.Text = State.Enabled ? "Выключить" : "Включить";
 
@@ -351,8 +405,8 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (!TargetAlive() && !TryFindGame())
         {
-            MessageBox.Show("Сначала зайдите в игру и нажмите хоткей включения, чтобы JdClicker узнал окно игры.",
-                "JdClicker", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("Сначала зайдите в игру и нажмите хоткей включения, чтобы программа узнала окно игры.",
+                AppInfo.Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
         var target = State.TargetHwnd;
@@ -444,18 +498,20 @@ internal sealed class TrayApp : ApplicationContext
     }
 
     void Balloon(string text, ToolTipIcon icon = ToolTipIcon.Info) =>
-        _tray.ShowBalloonTip(4000, "JdClicker", text, icon);
+        _tray.ShowBalloonTip(4000, AppInfo.Name, text, icon);
 
-    static Icon MakeIcon(Color c)
+    static Icon MakeIcon(Bitmap pig, Color c)
     {
         using var bmp = new Bitmap(32, 32);
         using (var g = Graphics.FromImage(bmp))
         {
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            g.DrawImage(pig, 0, 0, 32, 32);
             using var b = new SolidBrush(c);
-            using var p = new Pen(Color.FromArgb(40, 40, 40), 3);
-            g.FillEllipse(b, 3, 3, 26, 26);
-            g.DrawEllipse(p, 3, 3, 26, 26);
+            using var p = new Pen(Color.FromArgb(30, 30, 30), 2);
+            g.FillEllipse(b, 17, 17, 14, 14);
+            g.DrawEllipse(p, 17, 17, 14, 14);
         }
         return Icon.FromHandle(bmp.GetHicon());
     }
