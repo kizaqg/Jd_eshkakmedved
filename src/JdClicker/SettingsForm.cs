@@ -79,7 +79,7 @@ internal sealed class SettingsForm : Form
         int y = 10;
 
         // ---- Зелья ----
-        var gKeys = Group("Зелья: клавиша и как часто её жать", ref y, 30 + Settings.SlotCount * 30);
+        var gKeys = Group("Зелья: клавиша и как часто её жать", ref y, 50 + Settings.SlotCount * 30);
         for (int i = 0; i < Settings.SlotCount; i++)
         {
             int ry = 24 + i * 30;
@@ -258,7 +258,7 @@ internal sealed class SettingsForm : Form
         string admin = _app.NeedAdmin ? "\nИгра запущена от администратора — перезапустите программу от администратора (меню в трее)." : "";
         _status.ForeColor = _app.NeedAdmin ? Color.Firebrick : SystemColors.ControlText;
         _status.Text = $"Состояние: {state} · {game} · {chat}\n" +
-                       $"Нажатий дошло до игры: {Interlocked.Read(ref State.Sent)} · отсечено защитой: {Interlocked.Read(ref State.Blocked)}{admin}";
+                       $"Нажатий в секунду: {State.PressesPerSecond} · всего дошло до игры: {Interlocked.Read(ref State.Sent)} · отсечено защитой: {Interlocked.Read(ref State.Blocked)}{admin}";
         _hotkeyError.Text = _app.HotkeyError ?? "";
     }
 }

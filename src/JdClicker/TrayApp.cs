@@ -25,6 +25,8 @@ internal sealed class TrayApp : ApplicationContext
     string? _lastSavedJson;
     DateTime _ignoreWatcherUntil;
     int _tickCount;
+    long _rateSent;
+    long _rateAt = Environment.TickCount64;
 
     public string? HotkeyError { get; private set; }
     public bool NeedAdmin { get; private set; }
@@ -289,6 +291,15 @@ internal sealed class TrayApp : ApplicationContext
             }
         }
         if (State.TargetPid == 0 && ++_tickCount % 10 == 0) TryFindGame();
+
+        long now = Environment.TickCount64;
+        if (now - _rateAt >= 1000)
+        {
+            long sent = Interlocked.Read(ref State.Sent);
+            State.PressesPerSecond = (int)Math.Round((sent - _rateSent) * 1000.0 / (now - _rateAt));
+            _rateSent = sent;
+            _rateAt = now;
+        }
         UpdateUi();
     }
 
@@ -299,7 +310,7 @@ internal sealed class TrayApp : ApplicationContext
         if (!State.Enabled) return (Color.Gray, $"ВЫКЛ  {HotkeyText()}", _iconOff);
         if (State.ChatBlocks(s)) return (Color.Gold, "ЧАТ — пауза", _iconPause);
         if (s.SkipWhenModifiersHeld && State.ModifiersHeld()) return (Color.Gold, "ПАУЗА", _iconPause);
-        return (Color.LimeGreen, "ВКЛ", _iconOn);
+        return (Color.LimeGreen, $"ВКЛ  {State.PressesPerSecond}/сек", _iconOn);
     }
 
     void UpdateUi()

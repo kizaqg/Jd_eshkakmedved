@@ -28,6 +28,9 @@ internal static class State
     public static long Sent;
     public static long Blocked;
 
+    /// <summary>Сколько нажатий в секунду реально дошло до игры (обновляется раз в секунду).</summary>
+    public static volatile int PressesPerSecond;
+
     public static readonly int OwnPid = Environment.ProcessId;
 
     public static int ForegroundPid()
