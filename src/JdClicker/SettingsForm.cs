@@ -57,7 +57,9 @@ internal sealed class SettingsForm : Form
     readonly NumericUpDown[] _slotMs = new NumericUpDown[Settings.SlotCount];
     readonly NumericUpDown _hold, _gap;
     readonly KeyBox _hotkey;
-    readonly CheckBox _sound, _overlay, _pauseChat, _skipMods;
+    readonly CheckBox _sound, _overlay, _pauseChat, _skipMods, _vkInput;
+    readonly RadioButton _modeTurbo, _modeCustom;
+    readonly NumericUpDown _turboDelay;
     readonly Label _chatInfo, _gameInfo, _status, _hotkeyError;
     readonly System.Windows.Forms.Timer _statusTimer;
     bool _loading;
@@ -78,8 +80,19 @@ internal sealed class SettingsForm : Form
 
         int y = 10;
 
+        // ---- Режим ----
+        var gMode = Group("Режим", ref y, 112);
+        _modeTurbo = new RadioButton { Text = "Максимум: жать по кругу без остановки, как Clickerman", Location = new Point(14, 22), AutoSize = true };
+        gMode.Controls.Add(new Label { Text = "Пауза между нажатиями, мс (меньше = чаще)", Location = new Point(32, 50), AutoSize = true });
+        _turboDelay = new NumericUpDown { Location = new Point(280, 46), Width = 80, Minimum = 1, Maximum = 100 };
+        _modeCustom = new RadioButton { Text = "Свой интервал для каждой клавиши (настройки ниже)", Location = new Point(14, 80), AutoSize = true };
+        gMode.Controls.AddRange(new Control[] { _modeTurbo, _turboDelay, _modeCustom });
+        _modeTurbo.CheckedChanged += (_, _) => Changed();
+        _modeCustom.CheckedChanged += (_, _) => Changed();
+        _turboDelay.ValueChanged += (_, _) => Changed();
+
         // ---- Зелья ----
-        var gKeys = Group("Зелья: клавиша и как часто её жать", ref y, 50 + Settings.SlotCount * 30);
+        var gKeys = Group("Зелья: клавиши", ref y, 50 + Settings.SlotCount * 30);
         for (int i = 0; i < Settings.SlotCount; i++)
         {
             int ry = 24 + i * 30;
@@ -101,7 +114,10 @@ internal sealed class SettingsForm : Form
         });
 
         // ---- Нажатие ----
-        var gPress = Group("Нажатие", ref y, 84);
+        var gPress = Group("Нажатие", ref y, 112);
+        _vkInput = new CheckBox { Text = "Нажимать как Clickerman (виртуальный код + скан-код)", Location = new Point(14, 84), AutoSize = true };
+        gPress.Controls.Add(_vkInput);
+        _vkInput.CheckedChanged += (_, _) => Changed();
         gPress.Controls.Add(new Label { Text = "Длительность нажатия, мс", Location = new Point(14, 28), AutoSize = true });
         _hold = new NumericUpDown { Location = new Point(280, 24), Width = 80, Minimum = 5, Maximum = 200 };
         gPress.Controls.Add(new Label { Text = "Пауза между разными клавишами, мс", Location = new Point(14, 56), AutoSize = true });
@@ -201,6 +217,10 @@ internal sealed class SettingsForm : Form
                 _slotKey[i].Text = KeySpec.TryParse(s.Keys[i].Key, out var k) ? k.ToString() : s.Keys[i].Key;
                 _slotMs[i].Value = Math.Clamp(s.Keys[i].IntervalMs, (int)_slotMs[i].Minimum, (int)_slotMs[i].Maximum);
             }
+            _modeTurbo.Checked = s.TurboMode;
+            _modeCustom.Checked = !s.TurboMode;
+            _turboDelay.Value = s.TurboDelayMs;
+            _vkInput.Checked = s.ClickermanInput;
             _hold.Value = s.HoldMs;
             _gap.Value = s.GapMs;
             _hotkey.Text = KeySpec.TryParse(s.ToggleHotkey, out var hk) ? hk.ToString() : s.ToggleHotkey;
@@ -220,8 +240,12 @@ internal sealed class SettingsForm : Form
             ? "elementclient.exe (Jade Dynasty)"
             : s.GameProcess + ".exe");
         _hotkeyError.Text = _app.HotkeyError ?? "";
+        // В режиме «Максимум» интервалы и длительность не используются.
+        _turboDelay.Enabled = s.TurboMode;
+        _hold.Enabled = _gap.Enabled = !s.TurboMode;
         for (int i = 0; i < Settings.SlotCount; i++)
         {
+            _slotMs[i].Enabled = !s.TurboMode;
             bool bad = s.Keys[i].Enabled && s.Keys[i].Key.Length > 0 && s.Parsed[i] is null;
             _slotKey[i].BackColor = bad ? Color.MistyRose : SystemColors.Window;
         }
@@ -237,6 +261,9 @@ internal sealed class SettingsForm : Form
             s.Keys[i].Key = _slotKey[i].Text;
             s.Keys[i].IntervalMs = (int)_slotMs[i].Value;
         }
+        s.TurboMode = _modeTurbo.Checked;
+        s.TurboDelayMs = (int)_turboDelay.Value;
+        s.ClickermanInput = _vkInput.Checked;
         s.HoldMs = (int)_hold.Value;
         s.GapMs = (int)_gap.Value;
         s.ToggleHotkey = _hotkey.Text;

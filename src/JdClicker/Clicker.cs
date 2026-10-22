@@ -11,7 +11,11 @@ internal static unsafe class KeySender
 
     const ushort VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12;
 
-    public static bool Press(KeySpec k, int holdMs)
+    /// <summary>
+    /// Нажимает клавишу. holdMs = 0 — мгновенный «тап»: нажатие и отпускание одним вызовом, как KEYPRESS в Clickerman.
+    /// vkStyle — передавать виртуальный код вместе со скан-кодом (как keybd_event), иначе только скан-код.
+    /// </summary>
+    public static bool Press(KeySpec k, int holdMs, bool vkStyle)
     {
         Span<ushort> mods = stackalloc ushort[3];
         int n = 0;
@@ -19,25 +23,28 @@ internal static unsafe class KeySender
         if (k.Alt) mods[n++] = VK_MENU;
         if (k.Shift) mods[n++] = VK_SHIFT;
 
-        var down = stackalloc Native.INPUT[n + 1];
-        for (int i = 0; i < n; i++) down[i] = Make(mods[i], false);
-        down[n] = Make((ushort)k.Key, false);
+        var buf = stackalloc Native.INPUT[2 * (n + 1)];
+        var down = buf;
+        var up = buf + (n + 1);
+        for (int i = 0; i < n; i++) down[i] = Make(mods[i], false, vkStyle);
+        down[n] = Make((ushort)k.Key, false, vkStyle);
+        up[0] = Make((ushort)k.Key, true, vkStyle);
+        for (int i = 0; i < n; i++) up[i + 1] = Make(mods[n - 1 - i], true, vkStyle);
+
+        if (holdMs <= 0)
+            return Native.SendInput((uint)(2 * (n + 1)), buf, sizeof(Native.INPUT)) == 2 * (n + 1);
+
         bool ok = Native.SendInput((uint)(n + 1), down, sizeof(Native.INPUT)) == n + 1;
-
         Thread.Sleep(holdMs);
-
         // Отпускаем всегда, даже если нажатие было отклонено.
-        var up = stackalloc Native.INPUT[n + 1];
-        up[0] = Make((ushort)k.Key, true);
-        for (int i = 0; i < n; i++) up[i + 1] = Make(mods[n - 1 - i], true);
         Native.SendInput((uint)(n + 1), up, sizeof(Native.INPUT));
         return ok;
     }
 
-    static Native.INPUT Make(ushort vk, bool keyUp)
+    static Native.INPUT Make(ushort vk, bool keyUp, bool vkStyle)
     {
         uint sc = Native.MapVirtualKey(vk, Native.MAPVK_VK_TO_VSC_EX);
-        uint flags = Native.KEYEVENTF_SCANCODE;
+        uint flags = vkStyle ? 0 : Native.KEYEVENTF_SCANCODE;
         if ((sc >> 8) is 0xE0 or 0xE1) flags |= Native.KEYEVENTF_EXTENDEDKEY;
         if (keyUp) flags |= Native.KEYEVENTF_KEYUP;
         return new Native.INPUT
@@ -45,7 +52,13 @@ internal static unsafe class KeySender
             type = Native.INPUT_KEYBOARD,
             u = new Native.InputUnion
             {
-                ki = new Native.KEYBDINPUT { wVk = 0, wScan = (ushort)(sc & 0xFF), dwFlags = flags, dwExtraInfo = Magic },
+                ki = new Native.KEYBDINPUT
+                {
+                    wVk = vkStyle ? vk : (ushort)0,
+                    wScan = (ushort)(sc & 0xFF),
+                    dwFlags = flags,
+                    dwExtraInfo = Magic,
+                },
             },
         };
     }
@@ -58,6 +71,7 @@ internal sealed class Clicker
     readonly Stopwatch _clock = Stopwatch.StartNew();
     volatile bool _resetRequested = true;
     volatile bool _stop;
+    int _turboSlot = -1;
     Thread? _thread;
 
     public void Start()
@@ -97,6 +111,22 @@ internal sealed class Clicker
                     continue;
                 }
 
+                if (s.TurboMode)
+                {
+                    // Максимум: отмеченные клавиши по кругу, мгновенные нажатия, без интервалов.
+                    int slot = -1;
+                    for (int t = 1; t <= Settings.SlotCount; t++)
+                    {
+                        int i = (_turboSlot + t) % Settings.SlotCount;
+                        if (s.Parsed[i] is not null) { slot = i; break; }
+                    }
+                    if (slot < 0) { Thread.Sleep(20); continue; }
+                    _turboSlot = slot;
+                    KeySender.Press(s.Parsed[slot]!.Value, 0, s.ClickermanInput);
+                    Thread.Sleep(s.TurboDelayMs);
+                    continue;
+                }
+
                 // Самый «просроченный» слот жмём первым, так клавиши чередуются честно.
                 int pick = -1;
                 long best = long.MaxValue, next = long.MaxValue;
@@ -115,7 +145,7 @@ internal sealed class Clicker
 
                 var spec = s.Parsed[pick]!.Value;
                 // Счётчики State.Sent/Blocked ведёт хук: он видит, дошло ли нажатие до игры.
-                KeySender.Press(spec, s.HoldMs);
+                KeySender.Press(spec, s.HoldMs, s.ClickermanInput);
                 _due[pick] = _clock.ElapsedMilliseconds + s.Keys[pick].IntervalMs;
 
                 if (s.GapMs > 0) Thread.Sleep(s.GapMs);

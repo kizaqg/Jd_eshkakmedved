@@ -26,6 +26,13 @@ internal sealed class Settings
     public const int SlotCount = 6;
 
     public List<KeySlot> Keys { get; set; } = new();
+    /// <summary>Максимум: жать отмеченные клавиши по кругу без остановки, как Clickerman.</summary>
+    public bool TurboMode { get; set; } = true;
+    public int TurboDelayMs { get; set; } = 3;
+
+    /// <summary>Нажатие как у Clickerman: виртуальный код + скан-код. Иначе — только скан-код.</summary>
+    public bool ClickermanInput { get; set; } = true;
+
     public int HoldMs { get; set; } = 30;
     public int GapMs { get; set; } = 40;
     public string ToggleHotkey { get; set; } = "F11";
@@ -61,6 +68,7 @@ internal sealed class Settings
         while (Keys.Count < SlotCount) Keys.Add(new KeySlot { Enabled = false });
         if (Keys.Count > SlotCount) Keys.RemoveRange(SlotCount, Keys.Count - SlotCount);
         HoldMs = Math.Clamp(HoldMs, 5, 200);
+        TurboDelayMs = Math.Clamp(TurboDelayMs, 1, 100);
         GapMs = Math.Clamp(GapMs, 0, 1000);
         ToggleHotkey ??= "";
         GameProcess ??= "";
